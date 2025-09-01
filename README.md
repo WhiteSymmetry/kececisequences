@@ -26,5 +26,6 @@ It demonstrates how a small initial difference can cause large divergences in ch
 ---
 
 Buradaki 3D-Kaos kodu buradan (https://github.com/numberwonderman/Collatz-box-universes/blob/main/chaosSlicer.html) ilham alınmıştır.
-"The 3D-Chaos code here is inspired by (https://github.com/numberwonderman/Collatz-box-universes/blob/main/chaosSlicer.html).
+
+The 3D-Chaos code here is inspired by (https://github.com/numberwonderman/Collatz-box-universes/blob/main/chaosSlicer.html).
 
