@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Keçeci Sequences: Keçeci Dizileri — Periyot & KPN + 3D Kaos</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.153/build/three.min.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin:20px; background:#fafafa; color:#222 }
+    .card { max-width:1100px; border:1px solid #e2e2e2; padding:16px; border-radius:10px; background:#fff; box-shadow:0 6px 18px rgba(0,0,0,0.03) }
+    input[type=number]{ padding:8px; border-radius:6px; border:1px solid #ccc; width:110px; margin-right:8px }
+    label { margin-right:12px; font-size:14px }
+    button{ padding:8px 12px; border-radius:8px; border:0; cursor:pointer; background:#111;color:#fff }
+    pre{ background:#f7f7f7; padding:12px; border-radius:8px; white-space:pre-wrap; font-size:13px; overflow:auto; max-height:260px }
+    .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:12px }
+    canvas{ margin-top:16px; border-radius:8px; background:#fff }
+    #three-canvas-container{ width:100%; height:400px; margin-top:12px; border-radius:8px; border:1px solid #ddd }
+    .muted { color:#666; font-size:13px }
+  </style>
+</head>
+<body>
+  <div class="card">
+<div class="card">
+  <h2>Keçeci Sequences: Keçeci Dizileri — Periyot & KPN + Kaos Modeli</h2>
+
+  <div class="controls">
+    <label>Başlangıç (S₀): <input id="start" type="number" value="0" /></label>
+    <label>Artış (A): <input id="inc" type="number" value="9" /></label>
+    <label>İterasyon (N): <input id="iters" type="number" value="40" /></label>
+    <label><input id="includeInter" type="checkbox" checked /> Ara adımları göster</label>
+    <label>Kaç adım üretilecek: <input id="steps" type="number" value="200" /></label>
+    <label>Periyot arama sınırı: <input id="periodLimit" type="number" value="1000" /></label>
+    <button id="runBtn">Üret</button>
+    <span class="muted">Not: KPN tespiti periyodik sufiks üzerinden yapılır.</span>
+  </div>
+
+  <pre id="out"></pre>
+  <pre id="chaosOut"></pre>
+
+  <canvas id="chart" width="980" height="320"></canvas>
+  <div id="three-canvas-container" style="width:100%; height:400px; margin-top:16px;"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+  // --------- Mevcut Keçeci Fonksiyonları ----------
+  function isPrime(n) {
+    n = Math.floor(Math.abs(Number(n)));
+    if (n < 2) return false;
+    if (n === 2) return true;
+    if (n % 2 === 0) return false;
+    const r = Math.floor(Math.sqrt(n));
+    for (let i = 3; i <= r; i += 2) if (n % i === 0) return false;
+    return true;
+  }
+
+  function generateKececiSequence(start, add, desiredLength) {
+    const seq = [];
+    let current = Number(start);
+    let lastDivisor = null;
+    let askSign = 1;
+    const ASK_UNIT = 1;
+    seq.push(current);
+
+    while (seq.length < desiredLength) {
+      const added = current + add;
+      seq.push(added);
+      const primary = (lastDivisor === 3) ? 2 : 3;
+      const secondary = (primary === 2) ? 3 : 2;
+
+      if (added % primary === 0) { const v = added/primary; seq.push(v); current=v; lastDivisor=primary; continue; }
+      if (added % secondary === 0) { const v = added/secondary; seq.push(v); current=v; lastDivisor=secondary; continue; }
+
+      if (isPrime(added)) {
+        const modified = added + askSign*ASK_UNIT; askSign*=-1; seq.push(modified);
+        if (modified % primary === 0) { const v=modified/primary; seq.push(v); current=v; lastDivisor=primary; continue; }
+        if (modified % secondary === 0) { const v=modified/secondary; seq.push(v); current=v; lastDivisor=secondary; continue; }
+        current=modified; continue;
+      }
+      current=added;
+    }
+    return seq.slice(0, desiredLength);
+  }
+
+  // --------- Periyot ve KPN Fonksiyonları ---------
+  function findPeriodicSuffix(seq, limit) {
+    const n = seq.length;
+    const maxP = Math.min(limit, Math.floor(n/2));
+    for (let s=0; s<=n-2; s++) {
+      for (let p=1; p<=maxP && s+2*p<=n; p++) {
+        let ok=true;
+        for (let i=s;i<n;i++){ if(seq[i]!=seq[s+((i-s)%p)]){ok=false;break;} }
+        if(ok) return {start:s, period:p};
+      }
+    }
+    return null;
+  }
+
+  function findKPNFromSuffix(seq,start,period){
+    if(start===null||period===null)return null;
+    const freq=new Map(); const firstIdx=new Map();
+    for(let i=start;i<seq.length;i++){
+      const v=Math.floor(Math.abs(Number(seq[i])));
+      if(!isPrime(v))continue;
+      freq.set(v,(freq.get(v)||0)+1);
+      if(!firstIdx.has(v))firstIdx.set(v,i-start);
+    }
+    if(freq.size===0)return null;
+    let best=null,bestCnt=-1,bestPos=Infinity;
+    for(const [p,c] of freq.entries()){
+      const pos=firstIdx.get(p);
+      if(c>bestCnt||(c===bestCnt&&pos<bestPos)){best=p;bestCnt=c;bestPos=pos;}
+    }
+    return best;
+  }
+
+  // --------- Kaos Fonksiyonları ----------
+  function calculateChaosMetrics(seq1,seq2,start1,start2){
+    let metricsText=`Comparison for Sequences (n₁=${start1}, n₂=${start2})\nLength 1: ${seq1.length}\nLength 2: ${seq2.length}\n`;
+    const minLength=Math.min(seq1.length,seq2.length);
+    let firstDivergenceStep=-1;
+    let lastDistance=0;
+    for(let i=0;i<minLength;i++){
+      if(seq1[i]!==seq2[i]){
+        if(firstDivergenceStep===-1)firstDivergenceStep=i;
+        lastDistance=Math.abs(seq1[i]-seq2[i]);
+      }
+    }
+    metricsText+=`\nFirst Divergence at Step: ${firstDivergenceStep===-1?'Never':firstDivergenceStep}\nDistance at last common step: ${lastDistance}`;
+    return metricsText;
+  }
+
+  // --------- Chart ----------
+  let chartObj=null;
+  function drawChart(seq,periodInfo){
+    const ctx=document.getElementById('chart').getContext('2d');
+    if(chartObj) chartObj.destroy();
+    const labels=seq.map((_,i)=>i);
+    const baseData=seq.map(Number);
+    let overlay=new Array(seq.length).fill(null);
+    if(periodInfo){ const s=periodInfo.start; for(let i=s;i<seq.length;i++) overlay[i]=seq[i]; }
+    chartObj=new Chart(ctx,{
+      type:'line',
+      data:{ labels:labels, datasets:[
+        {label:'Keçeci Dizisi', data:baseData,borderColor:'#888',backgroundColor:'#ccc',fill:false,pointRadius:3,borderWidth:1},
+        {label:'Periyodik Sufiks', data:overlay,borderColor:'#d9534f',backgroundColor:'#f7b2b0',fill:false,pointRadius:4,borderWidth:2}
+      ]},
+      options:{responsive:true,interaction:{mode:'index',intersect:false},plugins:{legend:{display:true}},
+        scales:{x:{title:{display:true,text:'Adım (index)'}}, y:{title:{display:true,text:'Değer'}}}
+      }
+    });
+  }
+
+  // --------- Three.js 3D Kaos Modeli ----------
+  let scene,camera,renderer,cubes=[],isMouseDown=false,mouseX=0,mouseY=0,container;
+  function initThreeJS(){
+    container=document.getElementById('three-canvas-container');
+    const canvas=document.createElement('canvas');
+    container.appendChild(canvas);
+    scene=new THREE.Scene();
+    scene.background=new THREE.Color(0x1a202c);
+    camera=new THREE.PerspectiveCamera(75,container.clientWidth/container.clientHeight,0.1,1000);
+    renderer=new THREE.WebGLRenderer({canvas:canvas,antialias:true});
+    renderer.setSize(container.clientWidth,container.clientHeight);
+    camera.position.set(20,20,20); camera.lookAt(0,0,0);
+    const ambientLight=new THREE.AmbientLight(0xffffff,0.5); scene.add(ambientLight);
+    const dirLight=new THREE.DirectionalLight(0xffffff,0.5); dirLight.position.set(5,10,7.5); scene.add(dirLight);
+    scene.add(new THREE.AxesHelper(10));
+    animate();
+    canvas.addEventListener('mousedown',e=>{isMouseDown=true;mouseX=e.clientX;mouseY=e.clientY;});
+    canvas.addEventListener('mouseup',e=>{isMouseDown=false;});
+    canvas.addEventListener('mousemove',onMouseMove);
+    window.addEventListener('resize',onWindowResize);
+  }
+  function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); }
+
+
+  function onMouseMove(e) { 
+    if (!isMouseDown) return;
+    const deltaX = e.clientX - mouseX;
+    const deltaY = e.clientY - mouseY;
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    camera.position.x -= deltaX * 0.1;
+    camera.position.y += deltaY * 0.1;
+    camera.lookAt(0, 0, 0);
+  }
+
+  function onWindowResize() {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+  }
+
+  function draw3DChaos(seq1, seq2) {
+    // Önce eski küpleri temizle
+    for (let c of cubes) scene.remove(c);
+    cubes = [];
+
+    const len = Math.min(seq1.length, seq2.length);
+    for (let i = 0; i < len; i++) {
+      const height = Math.abs(seq1[i] - seq2[i]) + 1;
+      const geometry = new THREE.BoxGeometry(0.5, height, 0.5);
+      const colorValue = Math.min(1, height / 50);
+      const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(colorValue, 0.2, 1 - colorValue) });
+      const cube = new THREE.Mesh(geometry, material);
+      cube.position.set(i % 20 - 10, height / 2, Math.floor(i / 20) - 5);
+      scene.add(cube);
+      cubes.push(cube);
+    }
+  }
+
+  // --------- Ana Koşucu ----------
+  async function runOnce() {
+    let start = Number(document.getElementById('start').value || 0);
+    let inc = Number(document.getElementById('inc').value || 9);
+    const iters = Math.max(1, Number(document.getElementById('iters').value || 40));
+    const includeInter = document.getElementById('includeInter').checked;
+    let steps = Math.max(10, Number(document.getElementById('steps').value || 200));
+    let periodLimit = Math.max(1, Number(document.getElementById('periodLimit').value || 1000));
+
+    while (true) {
+      const seq = generateKececiSequence(start, inc, steps);
+      const periodInfo = findPeriodicSuffix(seq, periodLimit);
+      let kpn = periodInfo ? findKPNFromSuffix(seq, periodInfo.start, periodInfo.period) : null;
+
+      let out = '';
+      if (includeInter) {
+        out += 'intermediate calculation steps: Yes\n';
+        out += JSON.stringify(seq.slice(0, iters).map(String)) + '\n';
+      } else {
+        out += 'intermediate calculation steps: No\n';
+        out += 'Preview: ' + JSON.stringify(seq.slice(0, Math.min(40, iters)).map(String)) + (iters > 40 ? '...' : '') + '\n';
+      }
+
+      if (periodInfo) {
+        out += `\nPeriyot bulundu. (sufiks başlangıcı index = ${periodInfo.start}, periyot uzunluğu = ${periodInfo.period})\n`;
+        out += `Periyot dizisi: ${JSON.stringify(seq.slice(periodInfo.start, periodInfo.start + periodInfo.period).map(String))}\n`;
+        out += kpn !== null ? `Keçeci Prime Number found: ${kpn}` : 'Keçeci Prime Number found: None (periyod içinde asal yok)';
+      } else {
+        out += '\nPeriyot bulunamadı.\n';
+      }
+      document.getElementById('out').textContent = out;
+
+      drawChart(seq, periodInfo);
+
+      // ---------- Kaos Modeli ----------
+      const seq2 = generateKececiSequence(start + 1, inc, steps); // küçük fark ile ikinci dizi
+      const chaosText = calculateChaosMetrics(seq, seq2, start, start+1);
+      document.getElementById('chaosOut').textContent = chaosText;
+      draw3DChaos(seq, seq2);
+
+      return;
+    }
+  }
+
+  document.getElementById('runBtn').addEventListener('click', runOnce);
+  initThreeJS();
+</script>
+
